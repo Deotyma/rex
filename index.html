@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rex 3D - Three.js</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background-color: goldenrod; overflow: hidden; }
+        .container { width: 100vw; height: 100vh; position: relative; }
+        .title {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 24px;
+            font-family: Arial, sans-serif;
+            text-shadow: 2px 2px 10px rgba(255, 255, 255, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="tree-canvas"></canvas>
+    </div>
+    <div class="title">🦖 Cliquez pour faire manger Rex !</div>
+
+    <!-- Importation des modules Three.js -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.164.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.164.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+        import * as THREE from "three";
+        import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+        import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+        import { TextureLoader } from "three";
+        
+        // Sélection des éléments HTML
+        const container = document.querySelector(".container");
+        const canvas = document.querySelector("#tree-canvas");
+        
+        let rexModel;
+        let targetPosition = new THREE.Vector3();
+        let isMoving = false;
+        let mixer;
+        let walkAction;
+        let eatAction;
+        const minodons = []; // Liste des Minodons à attaquer
+        
+        // Configuration du rendu
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, canvas: canvas });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        
+        // Création de la scène
+        const scene = new THREE.Scene();
+        
+        // Ajout de la caméra
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1, 5);
+        
+        // Ajout des contrôles
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        
+        // Ajout des lumières
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+        directionalLight.position.set(2, 4, 5);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+        
+        // Ajout de l'image de fond
+        const textureLoader = new TextureLoader();
+        const backgroundTexture = textureLoader.load("foretJour.jpg");
+        scene.background = backgroundTexture;
+        
+        // Charger Rex avec animations
+        const loader = new GLTFLoader();
+loader.load("gugow_rex.glb", (gltf) => {
+    rexModel = gltf.scene;
+
+    //Créer un groupe pour pivoter Rex sans affecter son animation
+    const pivotGroup = new THREE.Group();
+    pivotGroup.add(rexModel);
+    scene.add(pivotGroup);
+
+    rexModel.position.set(0, -1.7, 0);
+    rexModel.scale.set(0.7, 0.7, 0.7);
+    pivotGroup.rotation.y = Math.PI;
+
+    console.log("Rex chargé !");
+
+    // **Créer un mixer d'animation**
+    mixer = new THREE.AnimationMixer(rexModel);
+
+    if (gltf.animations.length > 0) {
+        console.log("Animations disponibles :", gltf.animations.map(a => a.name));
+
+        walkAction = mixer.clipAction(gltf.animations.find(a => a.name.toLowerCase().includes("walk")) || gltf.animations[0]);
+        walkAction.setLoop(THREE.LoopRepeat);
+        walkAction.clampWhenFinished = true;
+        walkAction.enable = true;
+
+        eatAction = mixer.clipAction(gltf.animations.find(a => a.name.toLowerCase().includes("attack")) || gltf.animations[4]);
+        eatAction.setLoop(THREE.LoopOnce);
+        eatAction.clampWhenFinished = true;
+    }
+
+    rexModel.pivotGroup = pivotGroup;
+});
+
+        
+        // Raycaster pour détecter l'endroit du clic
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 1.7);
+        
+        // Fonction pour ajouter Minodon au clic
+        const gltfLoader = new GLTFLoader();
+        function addModelAtClick(event) {
+    if (!rexModel) return;
+
+    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(pointer, camera);
+    const intersect = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(plane, intersect)) {
+        
+        gltfLoader.load("minodon.glb", (gltf) => {
+            const newModel = gltf.scene.clone();
+            newModel.scale.set(0.2, 0.2, 0.2);
+            newModel.position.set(intersect.x, intersect.y, intersect.z);
+            newModel.rotation.y = Math.PI;
+            newModel.isBeingEaten = false; //Propriété pour éviter les attaques multiples
+            scene.add(newModel);
+            minodons.push(newModel);
+            console.log("Minodon ajouté à :", intersect);
+        },
+        undefined,
+        (error) => console.error("Erreur lors du chargement de Minodon :", error));
+    }
+}
+
+        
+        // Ajouter l'écouteur d'événement de clic pour créer un modèle
+        window.addEventListener("click", addModelAtClick);
+        
+        // Écouteur d'événement de clic pour déplacer Rex
+        window.addEventListener("click", (event) => {
+            if (!rexModel) return;
+        
+            pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+            pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        
+            raycaster.setFromCamera(pointer, camera);
+            const intersect = new THREE.Vector3();
+            if (raycaster.ray.intersectPlane(plane, intersect)) {
+                targetPosition.set(intersect.x, rexModel.position.y, intersect.z);
+                isMoving = true;
+        
+                if (walkAction) walkAction.play();
+            }
+        });
+        
+        // Vérifier si Rex doit attaquer Minodon
+        function checkForAttack() {
+    if (!rexModel || !eatAction) return;
+
+    for (let i = minodons.length - 1; i >= 0; i--) {
+        const minodon = minodons[i];
+        const distance = rexModel.pivotGroup.position.distanceTo(minodon.position);
+
+        if (distance < 1.9 && !minodon.isBeingEaten) { // Vérifie si Minodon n'a pas encore été mangé
+            console.log("Rex attaque Minodon !");
+            minodon.isBeingEaten = true; //Marquer Minodon comme attaqué
+
+            if (walkAction) walkAction.stop();
+            eatAction.reset().play();
+
+            //Supprimer Minodon après l'animation
+            setTimeout(() => {
+                scene.remove(minodon);
+                minodons.splice(i, 1);
+                console.log("Minodon éliminé !");
+                
+                // 📌 Reprendre la marche s'il y a d'autres cibles
+                if (isMoving) walkAction.play();
+            }, 2000);
+        }
+    }
+}
+
+
+        
+        // Déplacement de Rex
+        function moveRex(deltaTime) {
+            if (!rexModel || !isMoving) return;
+        
+            const speed = 2;
+            const direction = new THREE.Vector3().subVectors(targetPosition, rexModel.pivotGroup.position);
+            const distance = direction.length();
+            const stopDistance = 1.9;
+        
+            if (distance > stopDistance) {
+                direction.normalize();
+                rexModel.pivotGroup.position.addScaledVector(direction, speed * deltaTime);
+        
+                const lookAtMatrix = new THREE.Matrix4();
+                lookAtMatrix.lookAt(targetPosition, rexModel.pivotGroup.position, new THREE.Vector3(0, 1, 0));
+        
+                const quaternion = new THREE.Quaternion();
+                quaternion.setFromRotationMatrix(lookAtMatrix);
+                rexModel.pivotGroup.quaternion.copy(quaternion);
+        
+                rexModel.pivotGroup.rotateY(Math.PI);
+            } else {
+                isMoving = false;
+                if (walkAction) walkAction.stop();
+                //Forcer l'attaque immédiatement après l'arrêt
+                checkForAttack();
+            }
+        }
+        
+        // Boucle d'animation
+        let previousTime = performance.now();
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const currentTime = performance.now();
+            const deltaTime = (currentTime - previousTime) / 1000;
+            previousTime = currentTime;
+        
+            moveRex(deltaTime);
+            checkForAttack();
+        
+            if (mixer) {
+                mixer.update(deltaTime);
+            }
+        
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+        
+        // Gestion du redimensionnement
+        window.addEventListener("resize", () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        </script>
+</body>
+</html>
